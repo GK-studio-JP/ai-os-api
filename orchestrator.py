@@ -83,7 +83,7 @@ def _get_comments(number: int) -> list[dict[str, Any]]:
 
 
 def _event_comment(event: dict[str, Any]) -> str:
-    return "<!-- ai-bb:v1 -->\n\`\`\`json\n" + json.dumps(event, ensure_ascii=False, indent=2) + "\n\`\`\`"
+    return "<!-- ai-bb:v1 -->\n```json\n" + json.dumps(event, ensure_ascii=False, indent=2) + "\n```"
 
 
 def _persist_event(number: int, proposal: dict[str, Any]) -> dict[str, Any]:
