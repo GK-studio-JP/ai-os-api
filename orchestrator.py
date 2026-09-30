@@ -236,15 +236,20 @@ def start_run(payload: dict[str, Any]) -> dict[str, Any]:
     if not worker_id:
         raise ValueError("worker_id must not be empty")
 
+    project_task_payload = {
+        "project_id": str(project_id),
+        "objective": objective,
+        "priority": int(payload.get("priority", 50)),
+        "acceptance": payload.get("acceptance", []),
+    }
+    target_repository = payload.get("target_repository")
+    if target_repository is not None:
+        project_task_payload["target_repository"] = str(target_repository)
+
     project_task = _service_post(
         "projects",
         "/api/projects/task",
-        {
-            "project_id": str(project_id),
-            "objective": objective,
-            "priority": int(payload.get("priority", 50)),
-            "acceptance": payload.get("acceptance", []),
-        },
+        project_task_payload,
     )
     issue_spec = project_task["issue"]
     issue = _create_issue(issue_spec["title"], issue_spec["body"])
