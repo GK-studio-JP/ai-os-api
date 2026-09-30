@@ -2,6 +2,7 @@ import copy
 import hashlib
 import json
 import unittest
+from unittest.mock import patch
 
 import orchestrator
 
@@ -64,6 +65,43 @@ class MemoryIntegrationTests(unittest.TestCase):
             {"available": True, "results": []},
         )
         self.assertIs(result, invocation)
+
+
+class TargetRepositoryTests(unittest.TestCase):
+    def _capture_project_task(self, payload):
+        captured = {}
+
+        def fake_service_post(name, path, service_payload):
+            if name == "projects" and path == "/api/projects/task":
+                captured.update(service_payload)
+                raise RuntimeError("stop after project task request")
+            raise AssertionError(f"unexpected service call: {name} {path}")
+
+        with patch.object(orchestrator, "_service_post", side_effect=fake_service_post):
+            with self.assertRaisesRegex(RuntimeError, "stop after project task request"):
+                orchestrator.start_run(payload)
+        return captured
+
+    def test_start_run_forwards_target_repository(self):
+        captured = self._capture_project_task(
+            {
+                "project_id": "aios-v1-hardening",
+                "objective": "Propagate target repository",
+                "worker_id": "worker:test",
+                "target_repository": "GK-studio-JP/ai-os-api",
+            }
+        )
+        self.assertEqual(captured["target_repository"], "GK-studio-JP/ai-os-api")
+
+    def test_start_run_omits_target_repository_when_unspecified(self):
+        captured = self._capture_project_task(
+            {
+                "project_id": "aios-v1-hardening",
+                "objective": "Use canonical repository",
+                "worker_id": "worker:test",
+            }
+        )
+        self.assertNotIn("target_repository", captured)
 
 
 if __name__ == "__main__":
