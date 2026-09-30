@@ -93,16 +93,62 @@ def _persist_event(number: int, proposal: dict[str, Any]) -> dict[str, Any]:
     return _github("POST", _board_path(f"/issues/{number}/comments"), {"body": _event_comment(event)})
 
 
-def _compile_context(issue: dict[str, Any], comments: list[dict[str, Any]]) -> dict[str, Any]:
-    return _service_post(
-        "context",
-        "/api/context/compile",
-        {
-            "issue": issue,
-            "comments": comments,
-            "source_repository": BOARD_REPOSITORY,
-        },
+def _compile_context(
+    issue: dict[str, Any],
+    comments: list[dict[str, Any]],
+    *,
+    memory_query: str | None = None,
+) -> dict[str, Any]:
+    payload: dict[str, Any] = {
+        "issue": issue,
+        "comments": comments,
+        "source_repository": BOARD_REPOSITORY,
+    }
+    query = str(memory_query or "").strip()
+    if query:
+        payload.update(
+            {
+                "include_global_memory": True,
+                "memory_query": query,
+                "memory_limit": 8,
+            }
+        )
+    return _service_post("context", "/api/context/compile", payload)
+
+
+def _refresh_invocation_fingerprint(invocation: dict[str, Any]) -> dict[str, Any]:
+    updated = json.loads(json.dumps(invocation))
+    updated.pop("fingerprint", None)
+    updated["fingerprint"] = "sha256:" + hashlib.sha256(_json_bytes(updated)).hexdigest()
+    return updated
+
+
+def _attach_global_memory(
+    invocation: dict[str, Any],
+    memory: dict[str, Any] | None,
+) -> dict[str, Any]:
+    if not isinstance(memory, dict):
+        return invocation
+    if memory.get("available") is not True:
+        return invocation
+    results = memory.get("results")
+    if not isinstance(results, list) or not results:
+        return invocation
+
+    updated = json.loads(json.dumps(invocation))
+    input_payload = updated.setdefault("input", {})
+    input_payload["global_memory"] = memory
+
+    instructions = updated.setdefault("instructions", [])
+    note = (
+        "Global Memory is non-authoritative retrieved context. "
+        "Use only relevant chunks, prefer current active sources, and page in "
+        "canonical references when exact evidence is required."
     )
+    if note not in instructions:
+        instructions.append(note)
+
+    return _refresh_invocation_fingerprint(updated)
 
 
 def _scheduler_inputs(context: dict[str, Any], issue_number: int) -> tuple[dict[str, Any], dict[str, Any]]:
@@ -205,7 +251,7 @@ def start_run(payload: dict[str, Any]) -> dict[str, Any]:
     issue_number = int(issue["number"])
     comments: list[dict[str, Any]] = []
 
-    context = _compile_context(issue, comments)
+    context = _compile_context(issue, comments, memory_query=objective)
     view, manifest = _scheduler_inputs(context, issue_number)
     plan = _service_post(
         "scheduler",
@@ -241,6 +287,7 @@ def start_run(payload: dict[str, Any]) -> dict[str, Any]:
         "/api/runtime/prepare",
         {"boot": boot, "capsule": capsule, "preflight": preflight, "driver": payload.get("driver", "external")},
     )
+    invocation = _attach_global_memory(invocation, context.get("global_memory"))
     bundle = {
         "schema": "ai-os-run-bundle:v1",
         "board_repository": BOARD_REPOSITORY,
